@@ -1,0 +1,1 @@
+export default function LoadingState({ title = 'Loading', detail = 'Please wait a moment.' }) { return <div className="loading-state" role="status" aria-live="polite"><i /><strong>{title}</strong><span>{detail}</span></div>; }

@@ -1,0 +1,15 @@
+flask
+flask-cors
+bcrypt
+pyjwt
+requests
+beautifulsoup4
+pandas
+numpy
+scikit-learn
+nltk
+matplotlib
+seaborn
+wordcloud
+pillow
+pytesseract

@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+ENV/
+
+# Node
+node_modules/
+frontend/dist/
+dist/
+
+# Spring Boot / Java
+target/
+*.class
+
+# Environment
+.env
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Large datasets
+dataset/*.csv
+dataset/*.zip
+
+# Trained model artifacts
+backend/*.pkl

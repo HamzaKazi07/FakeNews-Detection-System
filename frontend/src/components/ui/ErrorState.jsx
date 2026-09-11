@@ -1,0 +1,1 @@
+export default function ErrorState({ message = 'We could not complete this request.', onRetry }) { return <div className="error-state" role="alert"><strong>Something went wrong</strong><p>{message}</p>{onRetry && <button type="button" className="btn btn-secondary" onClick={onRetry}>Try again</button>}</div>; }

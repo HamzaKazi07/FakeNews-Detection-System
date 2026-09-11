@@ -1,0 +1,21 @@
+server:
+  port: ${SERVER_PORT:8080}
+  error:
+    include-message: never
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/fakenews}
+    username: ${DB_USERNAME:fakenews}
+    password: ${DB_PASSWORD:?DB_PASSWORD must be supplied}
+  jpa:
+    hibernate.ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+app:
+  jwt-secret: ${JWT_SECRET:?JWT_SECRET must be supplied}
+  jwt-expiration: PT7D
+  frontend-url: ${FRONTEND_URL:http://localhost:5173}
+  ml-service-url: ${ML_SERVICE_URL:http://localhost:8000}
+  ml-service-token: ${ML_SERVICE_TOKEN:?ML_SERVICE_TOKEN must be supplied}
+springdoc.swagger-ui.path: /swagger-ui.html
