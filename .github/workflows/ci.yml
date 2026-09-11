@@ -22,6 +22,7 @@ jobs:
   ml:
     runs-on: ubuntu-latest
     defaults: {run: {working-directory: python-ml-service}}
+    env: {PYTHONPATH: .}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
