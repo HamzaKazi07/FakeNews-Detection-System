@@ -8,6 +8,7 @@ from fastapi import FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, Field
 
 from .preprocessing import PREPROCESSING_VERSION, preprocess_text
+from .training import LABEL_TO_PREDICTION
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 MODEL_PATH = Path(os.getenv("MODEL_PATH", BASE_DIR / "backend" / "model.pkl"))
@@ -75,7 +76,7 @@ def predict(payload: PredictionRequest):
     probabilities = model.predict_proba(vector)[0]
     labels = list(model.classes_)
     best_index = max(range(len(probabilities)), key=probabilities.__getitem__)
-    prediction = "REAL" if int(labels[best_index]) == 1 else "FAKE"
+    prediction = LABEL_TO_PREDICTION[int(labels[best_index])]
     names = vectorizer.get_feature_names_out()
     scored = sorted(((names[index], float(vector[0, index])) for index in vector.nonzero()[1]), key=lambda item: item[1], reverse=True)
     return PredictionResponse(prediction=prediction, confidence=float(probabilities[best_index]),
