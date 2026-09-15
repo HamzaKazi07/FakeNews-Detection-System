@@ -1,45 +1,20 @@
 import os
+import sys
+from pathlib import Path
 import pandas as pd
 import numpy as np
-import re
 import pickle
 import nltk
-from nltk.corpus import stopwords
-from nltk.stem import WordNetLemmatizer
 from sklearn.model_selection import train_test_split
-from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, classification_report
 
-# Download necessary NLTK data safely if not already present
-for resource in ['stopwords', 'wordnet', 'omw-1.4']:
-    try:
-        nltk.data.find(f'corpora/{resource}')
-    except LookupError:
-        nltk.download(resource, quiet=True)
-
-def preprocess_text(text):
-    if not isinstance(text, str):
-        return ""
-    # Lowercase
-    text = text.lower()
-    # Remove URLs
-    text = re.sub(r'https?://\S+|www\.\S+', '', text)
-    # Remove HTML tags
-    text = re.sub(r'<.*?>', '', text)
-    # Remove punctuation, numbers, and symbols
-    text = re.sub(r'[^a-zA-Z\s]', '', text)
-    # Tokenize and remove stopwords, apply Lemmatization
-    stop_words = set(stopwords.words('english'))
-    lemmatizer = WordNetLemmatizer()
-    
-    words = text.split()
-    cleaned_words = [lemmatizer.lemmatize(w) for w in words if w not in stop_words]
-    
-    return " ".join(cleaned_words)
+SERVICE_DIR = Path(__file__).resolve().parents[1] / "python-ml-service"
+sys.path.insert(0, str(SERVICE_DIR))
+from app.training import create_vectorizer, prepare_article_text
 
 def main():
     print("=== Step 2 & 3: Loading and Cleaning Data ===")
@@ -75,21 +50,19 @@ def main():
     print(f"Cleaned dataset count: {len(data)}")
     
     # Combine title and text for better classification accuracy
-    data['full_text'] = data['title'] + " " + data['text']
+    data['full_text'] = [prepare_article_text(title, body) for title, body in zip(data['title'], data['text'])]
     
     print("\n=== Step 4: Text Preprocessing ===")
     print("Preprocessing text (lowercase, stopwords removal, lemmatization)...")
     # To speed up training in scripts, we can sample if needed, but we will use full or subset.
     # Let's take a sample of 15,000 for faster script demonstration, or run full if system is fast.
     sample_data = data.sample(n=min(15000, len(data)), random_state=42).copy()
-    sample_data['cleaned_text'] = sample_data['full_text'].apply(preprocess_text)
-    
-    X = sample_data['cleaned_text']
+    X = sample_data['full_text']
     y = sample_data['label']
     
     print("\n=== Step 6 & 7: Feature Extraction & Dataset Split ===")
     # TF-IDF Vectorizer
-    vectorizer = TfidfVectorizer(max_features=5000, max_df=0.85, min_df=2)
+    vectorizer = create_vectorizer()
     X_tfidf = vectorizer.fit_transform(X)
     
     X_train, X_test, y_train, y_test = train_test_split(X_tfidf, y, test_size=0.2, random_state=42, stratify=y)
