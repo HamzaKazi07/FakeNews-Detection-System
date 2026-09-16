@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import axios from 'axios';
+import { unwrapApiData } from './api/client';
+import apiClient from './api/client';
 
 import Navbar from './components/Navbar';
 import Home from './components/Home';
@@ -39,16 +40,9 @@ function App() {
       }
 
       try {
-        const res = await axios.get(
-          `${BACKEND_URL}/api/auth/me`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`
-            }
-          }
-        );
+        const res = await apiClient.get('/api/auth/me');
 
-        setUser(res.data.user);
+        setUser(unwrapApiData(res));
       } catch {
         console.warn(
           'Session expired or invalid token.'

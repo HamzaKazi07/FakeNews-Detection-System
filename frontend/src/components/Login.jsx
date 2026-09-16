@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import apiClient from '../api/client';
+import apiClient, { unwrapApiData } from '../api/client';
 
 function Login({
   onLoginSuccess,
@@ -31,7 +31,7 @@ function Login({
         }
       );
 
-      const { token, user } = res.data;
+      const { token, user } = unwrapApiData(res);
 
       if (!token || !user) {
         setError(

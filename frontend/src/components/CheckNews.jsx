@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { getApiErrorMessage, unwrapApiData } from '../api/client';
 
 export default function CheckNews({
   backendUrl,
@@ -226,7 +227,7 @@ export default function CheckNews({
         getAuthHeaders()
       );
 
-      setResult(res.data);
+      setResult(unwrapApiData(res));
 
     } catch (err) {
       console.error(
@@ -234,10 +235,7 @@ export default function CheckNews({
         err
       );
 
-      setError(
-        err.response?.data?.error ||
-        'Failed to analyze text.'
-      );
+      setError(getApiErrorMessage(err, 'Failed to analyze text.'));
     } finally {
       setLoading(false);
     }
@@ -288,10 +286,7 @@ export default function CheckNews({
         err
       );
 
-      setError(
-        err.response?.data?.error ||
-        'Failed to analyze article from URL.'
-      );
+      setError(getApiErrorMessage(err, 'Failed to analyze article from URL.'));
     } finally {
       setLoading(false);
     }
@@ -392,10 +387,7 @@ export default function CheckNews({
         err
       );
 
-      setError(
-        err.response?.data?.error ||
-        'Failed to process text image.'
-      );
+      setError(getApiErrorMessage(err, 'Failed to process text image.'));
     } finally {
       setLoading(false);
     }

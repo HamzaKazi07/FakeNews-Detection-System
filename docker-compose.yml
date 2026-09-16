@@ -30,6 +30,7 @@ services:
       ML_SERVICE_URL: http://ml-service:8000
       ML_SERVICE_TOKEN: ${ML_SERVICE_TOKEN}
       FRONTEND_URL: http://localhost:5173
+    ports: ["8080:8080"]
     depends_on:
       postgres: {condition: service_healthy}
       ml-service: {condition: service_healthy}

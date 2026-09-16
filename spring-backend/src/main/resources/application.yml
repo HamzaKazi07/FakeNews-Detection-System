@@ -14,7 +14,7 @@ spring:
     enabled: true
 app:
   jwt-secret: ${JWT_SECRET:?JWT_SECRET must be supplied}
-  jwt-expiration: PT7D
+  jwt-expiration: P7D
   frontend-url: ${FRONTEND_URL:http://localhost:5173}
   ml-service-url: ${ML_SERVICE_URL:http://localhost:8000}
   ml-service-token: ${ML_SERVICE_TOKEN:?ML_SERVICE_TOKEN must be supplied}

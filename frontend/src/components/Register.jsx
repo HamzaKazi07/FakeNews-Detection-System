@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import apiClient from '../api/client';
+import apiClient, { unwrapApiData } from '../api/client';
 
 function Register({ setActiveTab }) {
   const [formData, setFormData] = useState({
@@ -107,7 +107,7 @@ function Register({ setActiveTab }) {
     setLoading(true);
 
     try {
-      await apiClient.post(
+      const res = await apiClient.post(
         '/api/auth/register',
         {
           name: formData.name.trim(),
@@ -115,6 +115,7 @@ function Register({ setActiveTab }) {
           password: formData.password
         }
       );
+      unwrapApiData(res);
 
       // Do NOT login automatically.
       // User must login manually.

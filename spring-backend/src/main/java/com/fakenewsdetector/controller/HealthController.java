@@ -8,7 +8,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 public class HealthController {
-  @GetMapping("/api/health")
+  @GetMapping({"/health", "/api/health"})
   public ResponseEntity<Map<String, Object>> health() {
     return ResponseEntity.ok(Map.of("status", "UP", "timestamp", Instant.now().toString()));
   }
