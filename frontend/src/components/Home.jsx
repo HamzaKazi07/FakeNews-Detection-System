@@ -17,7 +17,7 @@ const workflow = [
 
 const technologies = [
   ['Frontend', 'React + Vite'],
-  ['Backend API', 'Flask'],
+  ['Backend API', 'Spring Boot + PostgreSQL + FastAPI'],
   ['Machine learning', 'Python + scikit-learn'],
   ['NLP features', 'TF-IDF'],
   ['Classifier', 'Logistic Regression'],

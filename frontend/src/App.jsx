@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { unwrapApiData } from './api/client';
+import { normalizeUser, unwrapApiData } from './api/client';
 import apiClient from './api/client';
 
 import Navbar from './components/Navbar';
@@ -9,8 +9,8 @@ import Register from './components/Register';
 import CheckNews from './components/CheckNews';
 import Dashboard from './components/Dashboard';
 import History from './components/History';
-import AdminPanel from './components/AdminPanel';
 import About from './components/About';
+import AdminPanel from './components/AdminPanel';
 
 import './App.css';
 import './design-system.css';
@@ -22,6 +22,10 @@ function App() {
   const [user, setUser] = useState(null);
   const [darkMode, setDarkMode] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
+
+  useEffect(() => {
+    if (window.scrollY > 0) window.scrollTo(0, 0);
+  }, [activeTab]);
 
   // Remember where an unauthenticated user wanted to go
   // for protected pages such as Dashboard and History.
@@ -42,7 +46,7 @@ function App() {
       try {
         const res = await apiClient.get('/api/auth/me');
 
-        setUser(unwrapApiData(res));
+        setUser(normalizeUser(unwrapApiData(res)));
       } catch {
         console.warn(
           'Session expired or invalid token.'
@@ -81,7 +85,10 @@ function App() {
 
     // If the user originally wanted Dashboard or History,
     // return them there after login.
-    const destination = pendingTab || 'check';
+    const requestedDestination = pendingTab || 'check';
+    const destination = requestedDestination === 'admin' && userData.role !== 'admin'
+      ? 'home'
+      : requestedDestination;
 
     setPendingTab(null);
     setActiveTab(destination);
@@ -91,6 +98,17 @@ function App() {
   // NAVIGATION
   // =========================================================
   const handleTabChange = useCallback((tab) => {
+    if (tab === 'admin') {
+      if (user?.role === 'admin') {
+        setActiveTab('admin');
+      } else if (!user) {
+        setPendingTab('admin');
+        setActiveTab('login');
+      } else {
+        setActiveTab('home');
+      }
+      return;
+    }
 
     // -------------------------------------------------------
     // CHECK NEWS IS PUBLIC
@@ -115,18 +133,6 @@ function App() {
       !user
     ) {
       setPendingTab(tab);
-      setActiveTab('login');
-      return;
-    }
-
-    // -------------------------------------------------------
-    // ADMIN REQUIRES ADMIN ROLE
-    // -------------------------------------------------------
-    if (
-      tab === 'admin' &&
-      (!user || user.role !== 'admin')
-    ) {
-      setPendingTab('admin');
       setActiveTab('login');
       return;
     }
@@ -267,13 +273,9 @@ function App() {
           />
         )}
 
-        {/* ADMIN */}
-        {activeTab === 'admin' &&
-          user?.role === 'admin' && (
-            <AdminPanel
-              backendUrl={BACKEND_URL}
-            />
-          )}
+        {activeTab === 'admin' && user?.role === 'admin' && (
+          <AdminPanel backendUrl={BACKEND_URL} />
+        )}
 
         {/* ABOUT */}
         {activeTab === 'about' && (

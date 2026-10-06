@@ -29,7 +29,9 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       ML_SERVICE_URL: http://ml-service:8000
       ML_SERVICE_TOKEN: ${ML_SERVICE_TOKEN}
-      FRONTEND_URL: http://localhost:5173
+      FRONTEND_URL: http://localhost:5174
+      NEWS_RSS_URL: ${NEWS_RSS_URL:-https://feeds.bbci.co.uk/news/rss.xml}
+      SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
     ports: ["8080:8080"]
     depends_on:
       postgres: {condition: service_healthy}
@@ -37,11 +39,13 @@ services:
   frontend:
     image: node:22-alpine
     working_dir: /app
-    volumes: [./frontend:/app]
-    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0 --port 5174"
     environment:
       VITE_API_BASE_URL: http://localhost:8080
-    ports: ["5173:5173"]
+    ports: ["5174:5174"]
     depends_on: [backend]
 volumes:
   postgres-data:

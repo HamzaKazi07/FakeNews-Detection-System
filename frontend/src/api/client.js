@@ -3,6 +3,11 @@ import axios from 'axios';
 const baseURL = import.meta.env.VITE_API_BASE_URL;
 const apiClient = axios.create({ baseURL, timeout: 15000 });
 
+export const normalizeUser = (user) => user == null ? user : ({
+  ...user,
+  role: typeof user.role === 'string' ? user.role.toLowerCase() : user.role
+});
+
 export const unwrapApiData = (response) => response.data?.data ?? response.data;
 
 export const getApiErrorMessage = (error, fallback) => {

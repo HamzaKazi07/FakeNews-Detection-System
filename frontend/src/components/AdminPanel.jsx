@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import React, { useState, useEffect, useCallback } from 'react';
+import apiClient, { getApiErrorMessage, unwrapApiData } from '../api/client';
 
-export default function AdminPanel({ backendUrl }) {
+export default function AdminPanel() {
   const [activeTab, setActiveTab] = useState('users'); // users, logs, stats
   const [users, setUsers] = useState([]);
   const [logs, setLogs] = useState([]);
@@ -11,48 +11,48 @@ export default function AdminPanel({ backendUrl }) {
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  useEffect(() => {
-    loadAdminData();
-  }, [activeTab]);
-
   const getAuthHeaders = () => {
     const token = localStorage.getItem('token');
     return { headers: { Authorization: `Bearer ${token}` } };
   };
 
-  const loadAdminData = async () => {
+  const loadAdminData = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
       setSuccessMsg('');
 
       if (activeTab === 'users') {
-        const res = await axios.get(`${backendUrl}/api/admin/users`, getAuthHeaders());
-        setUsers(res.data.users || []);
+        const res = await apiClient.get('/api/admin/users', getAuthHeaders());
+        setUsers(unwrapApiData(res).users || []);
       } else if (activeTab === 'logs') {
-        const res = await axios.get(`${backendUrl}/api/admin/logs`, getAuthHeaders());
-        setLogs(res.data.logs || []);
+        const res = await apiClient.get('/api/admin/logs', getAuthHeaders());
+        setLogs(unwrapApiData(res).logs || []);
       } else if (activeTab === 'stats') {
-        const res = await axios.get(`${backendUrl}/api/admin/stats`, getAuthHeaders());
-        setStats(res.data);
+        const res = await apiClient.get('/api/admin/stats', getAuthHeaders());
+        setStats(unwrapApiData(res));
       }
     } catch (err) {
-      setError(err.response?.data?.error || 'Access denied. Administrator privileges required.');
+      setError(getApiErrorMessage(err, 'Access denied. Administrator privileges required.'));
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeTab]);
+
+  useEffect(() => {
+    loadAdminData();
+  }, [loadAdminData]);
 
   const handleDeleteUser = async (userId, name) => {
     if (!window.confirm(`Are you sure you want to delete user: ${name}? All associated scan history will be removed.`)) return;
     try {
       setError('');
       setSuccessMsg('');
-      const res = await axios.delete(`${backendUrl}/api/admin/users/${userId}`, getAuthHeaders());
-      setSuccessMsg(res.data.message || 'User deleted successfully.');
+      const res = await apiClient.delete(`/api/admin/users/${userId}`, getAuthHeaders());
+      setSuccessMsg(unwrapApiData(res).message || 'User deleted successfully.');
       setUsers(prev => prev.filter(u => u.id !== userId));
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to delete user.');
+      setError(getApiErrorMessage(err, 'Failed to delete user.'));
     }
   };
 
@@ -61,11 +61,11 @@ export default function AdminPanel({ backendUrl }) {
     try {
       setError('');
       setSuccessMsg('');
-      const res = await axios.delete(`${backendUrl}/api/admin/logs/${logId}`, getAuthHeaders());
-      setSuccessMsg(res.data.message || 'Log deleted successfully.');
+      const res = await apiClient.delete(`/api/admin/logs/${logId}`, getAuthHeaders());
+      setSuccessMsg(unwrapApiData(res).message || 'Log deleted successfully.');
       setLogs(prev => prev.filter(l => l.id !== logId));
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to delete log entry.');
+      setError(getApiErrorMessage(err, 'Failed to delete log entry.'));
     }
   };
 
@@ -79,28 +79,43 @@ export default function AdminPanel({ backendUrl }) {
   };
 
   return (
-    <div className="glass-card">
-      <h2 style={{ fontFamily: 'var(--font-heading)', marginBottom: '1.25rem' }}>🛡️ Administrator Operations</h2>
+    <div className="glass-card admin-panel">
+      <header className="admin-panel__header">
+        <div>
+          <p className="section-label">SYSTEM MANAGEMENT</p>
+          <h1>Administrator dashboard</h1>
+          <p>Manage registered users, review prediction records, and monitor system totals.</p>
+        </div>
+      </header>
       
-      <div className="admin-tabs">
-        <div 
+      <div className="admin-tabs" role="tablist" aria-label="Admin dashboard sections">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'users'}
           className={`admin-tab ${activeTab === 'users' ? 'active' : ''}`}
           onClick={() => setActiveTab('users')}
         >
-          👤 Manage Users
-        </div>
-        <div 
+          Users
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'logs'}
           className={`admin-tab ${activeTab === 'logs' ? 'active' : ''}`}
           onClick={() => setActiveTab('logs')}
         >
-          📋 Scan Audit Logs
-        </div>
-        <div 
+          Prediction audit
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'stats'}
           className={`admin-tab ${activeTab === 'stats' ? 'active' : ''}`}
           onClick={() => setActiveTab('stats')}
         >
-          📊 Detailed Statistics
-        </div>
+          Statistics
+        </button>
       </div>
 
       {error && <div className="alert alert-danger">{error}</div>}
@@ -120,8 +135,8 @@ export default function AdminPanel({ backendUrl }) {
               {users.length === 0 ? (
                 <p style={{ color: 'var(--text-muted)' }}>No standard users registered yet.</p>
               ) : (
-                <div style={{ overflowX: 'auto' }}>
-                  <table className="history-table">
+                <div className="admin-table-wrap">
+                  <table className="history-table admin-table">
                     <thead>
                       <tr>
                         <th>User ID</th>
@@ -167,8 +182,8 @@ export default function AdminPanel({ backendUrl }) {
               {logs.length === 0 ? (
                 <p style={{ color: 'var(--text-muted)' }}>No audits logged in system.</p>
               ) : (
-                <div style={{ overflowX: 'auto' }}>
-                  <table className="history-table">
+                <div className="admin-table-wrap">
+                  <table className="history-table admin-table admin-table--audit">
                     <thead>
                       <tr>
                         <th>ID</th>
@@ -186,8 +201,8 @@ export default function AdminPanel({ backendUrl }) {
                         <tr key={log.id}>
                           <td>{log.id}</td>
                           <td>
-                            <div style={{ fontSize: '0.85rem', fontWeight: '600' }}>{log.user_name || 'Guest User'}</div>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{log.user_email || 'anonymous'}</div>
+                            <div style={{ fontSize: '0.85rem', fontWeight: '600' }}>{log.userName || 'Guest User'}</div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{log.userEmail || 'anonymous'}</div>
                           </td>
                           <td style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {log.news}
@@ -217,7 +232,7 @@ export default function AdminPanel({ backendUrl }) {
                             )}
                           </td>
                           <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                            {formatDate(log.date)}
+                            {formatDate(log.createdAt)}
                           </td>
                           <td>
                             <button 
@@ -239,8 +254,8 @@ export default function AdminPanel({ backendUrl }) {
 
           {/* STATS TAB */}
           {activeTab === 'stats' && stats && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
-              <div className="chart-card" style={{ gridColumn: '1 / -1' }}>
+            <div className="admin-stat-grid">
+              <div className="chart-card admin-stat-card admin-stat-card--wide">
                 <h4 style={{ marginBottom: '1rem' }}>Feedback Reliability Metrics</h4>
                 <div style={{ display: 'flex', gap: '3rem', margin: '1rem 0' }}>
                   <div>
@@ -258,12 +273,12 @@ export default function AdminPanel({ backendUrl }) {
                         : 'N/A'
                       }
                     </div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Precision Rate</div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Positive feedback share</div>
                   </div>
                 </div>
               </div>
               
-              <div className="chart-card">
+              <div className="chart-card admin-stat-card">
                 <h4 style={{ marginBottom: '0.5rem' }}>Database Volumes</h4>
                 <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1rem' }}>
                   <li style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -281,11 +296,10 @@ export default function AdminPanel({ backendUrl }) {
                 </ul>
               </div>
 
-              <div className="chart-card">
+              <div className="chart-card admin-stat-card">
                 <h4 style={{ marginBottom: '0.5rem' }}>System Integrity</h4>
                 <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: '1.5', marginTop: '1rem' }}>
-                  The local SQLite database file `fakenews.db` is operating normally. Automatic migrations are healthy.
-                  Admin rights are verified by cryptographic validation of JWT token scopes.
+                  Administrative access is restricted to authenticated users with the ADMIN role.
                 </p>
               </div>
             </div>

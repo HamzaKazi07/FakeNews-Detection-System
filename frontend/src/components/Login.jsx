@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import apiClient, { unwrapApiData } from '../api/client';
+import apiClient, { normalizeUser, unwrapApiData } from '../api/client';
 
 function Login({
   onLoginSuccess,
@@ -31,7 +31,8 @@ function Login({
         }
       );
 
-      const { token, user } = unwrapApiData(res);
+      const { token, user: backendUser } = unwrapApiData(res);
+      const user = normalizeUser(backendUser);
 
       if (!token || !user) {
         setError(
@@ -90,11 +91,12 @@ function Login({
       <form onSubmit={handleSubmit}>
 
         <div className="form-group">
-          <label>
+          <label htmlFor="login-email">
             Email Address
           </label>
 
           <input
+            id="login-email"
             type="email"
             placeholder="name@example.com"
             value={email}
@@ -105,11 +107,12 @@ function Login({
         </div>
 
         <div className="form-group">
-          <label>
+          <label htmlFor="login-password">
             Password
           </label>
 
           <input
+            id="login-password"
             type="password"
             placeholder="••••••••"
             value={password}

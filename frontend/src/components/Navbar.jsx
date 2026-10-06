@@ -61,14 +61,14 @@ export default function Navbar({ activeTab, setActiveTab, user, onLogout, darkMo
             </button>
           </li>
         )}
-        {user && user.role === 'admin' && (
+        {user?.role === 'admin' && (
           <li>
             <button
               type="button"
               className={`nav-link ${activeTab === 'admin' ? 'active' : ''}`}
               onClick={() => changeTab('admin')}
             >
-              Admin Panel
+              Admin
             </button>
           </li>
         )}

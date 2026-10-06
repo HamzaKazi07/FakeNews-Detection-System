@@ -12,10 +12,22 @@ spring:
     open-in-view: false
   flyway:
     enabled: true
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 11MB
 app:
   jwt-secret: ${JWT_SECRET:?JWT_SECRET must be supplied}
-  jwt-expiration: P7D
-  frontend-url: ${FRONTEND_URL:http://localhost:5173}
+  jwt-expiration: 7d
+  frontend-url: ${FRONTEND_URL:http://localhost:5174}
   ml-service-url: ${ML_SERVICE_URL:http://localhost:8000}
   ml-service-token: ${ML_SERVICE_TOKEN:?ML_SERVICE_TOKEN must be supplied}
-springdoc.swagger-ui.path: /swagger-ui.html
+  live-news-rss-url: ${NEWS_RSS_URL:https://feeds.bbci.co.uk/news/rss.xml}
+  swagger:
+    enabled: ${SWAGGER_ENABLED:false}
+springdoc:
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:false}
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:false}
+    path: /swagger-ui.html

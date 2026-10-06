@@ -1,3 +1,229 @@
 package com.fakenewsdetector.client;
-import com.fasterxml.jackson.annotation.JsonProperty; import com.fasterxml.jackson.databind.ObjectMapper; import java.net.*; import java.net.http.*; import java.time.Duration; import java.util.*; import org.slf4j.Logger; import org.slf4j.LoggerFactory; import org.springframework.beans.factory.annotation.Value; import org.springframework.stereotype.Component;
-@Component public class MlServiceClient { public record PredictionRequest(String text){} public record MlResult(String prediction,double confidence,@JsonProperty("important_words") List<String> importantWords,@JsonProperty("model_version") String modelVersion){} private static final Logger log=LoggerFactory.getLogger(MlServiceClient.class); private final HttpClient client;private final ObjectMapper mapper;private final String url;private final String token; public MlServiceClient(@Value("${app.ml-service-url}")String u,@Value("${app.ml-service-token}")String t,ObjectMapper m){client=HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(3)).build();url=u;token=t;mapper=m;} public MlResult predict(String text){try{String payload=mapper.writeValueAsString(new PredictionRequest(text));HttpRequest request=HttpRequest.newBuilder(URI.create(url+"/predict")).version(HttpClient.Version.HTTP_1_1).timeout(Duration.ofSeconds(15)).header("X-ML-Service-Token",token).header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(payload)).build();HttpResponse<String> response=client.send(request,HttpResponse.BodyHandlers.ofString());if(response.statusCode()!=200)throw new IllegalStateException("ML status " + response.statusCode());MlResult r=mapper.readValue(response.body(),MlResult.class);if(r==null||!("REAL".equals(r.prediction())||"FAKE".equals(r.prediction())))throw new IllegalStateException("Invalid ML response");return r;}catch(Exception ex){log.error("ML prediction request failed: {}",ex.toString());throw new MlUnavailableException();}} public static class MlUnavailableException extends RuntimeException{} }
+
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.net.*;
+import java.net.http.*;
+import java.time.Duration;
+import java.util.*;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+@Component
+public class MlServiceClient {
+
+    public record PredictionRequest(String text) {
+    }
+
+    public record MlResult(
+            String prediction,
+            double confidence,
+            @JsonProperty("important_words") List<String> importantWords,
+            @JsonProperty("model_version") String modelVersion
+    ) {
+    }
+
+    public record ImagePredictionRequest(
+            @JsonProperty("image_base64") String imageBase64
+    ) {
+    }
+
+    public record ImageMlResult(
+            String prediction,
+            double confidence,
+            @JsonProperty("important_words") List<String> importantWords,
+            @JsonProperty("model_version") String modelVersion,
+            @JsonProperty("extracted_text") String extractedText
+    ) {
+    }
+
+    private static final Logger log =
+            LoggerFactory.getLogger(MlServiceClient.class);
+
+    private final HttpClient client;
+    private final ObjectMapper mapper;
+    private final String url;
+    private final String token;
+
+    public MlServiceClient(
+            @Value("${app.ml-service-url}") String u,
+            @Value("${app.ml-service-token}") String t,
+            ObjectMapper m
+    ) {
+        client = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(Duration.ofSeconds(3))
+                .build();
+
+        url = u;
+        token = t;
+        mapper = m;
+    }
+
+    public MlResult predict(String text) {
+        try {
+            String payload =
+                    mapper.writeValueAsString(
+                            new PredictionRequest(text)
+                    );
+
+            HttpRequest request =
+                    HttpRequest.newBuilder(
+                                    URI.create(url + "/predict")
+                            )
+                            .version(HttpClient.Version.HTTP_1_1)
+                            .timeout(Duration.ofSeconds(15))
+                            .header(
+                                    "X-ML-Service-Token",
+                                    token
+                            )
+                            .header(
+                                    "Content-Type",
+                                    "application/json"
+                            )
+                            .POST(
+                                    HttpRequest.BodyPublishers
+                                            .ofString(payload)
+                            )
+                            .build();
+
+            HttpResponse<String> response =
+                    client.send(
+                            request,
+                            HttpResponse.BodyHandlers.ofString()
+                    );
+
+            if (response.statusCode() != 200) {
+                throw new IllegalStateException(
+                        "ML status " + response.statusCode()
+                );
+            }
+
+            MlResult r =
+                    mapper.readValue(
+                            response.body(),
+                            MlResult.class
+                    );
+
+            if (
+                    r == null ||
+                    !(
+                            "REAL".equals(r.prediction()) ||
+                            "FAKE".equals(r.prediction())
+                    )
+            ) {
+                throw new IllegalStateException(
+                        "Invalid ML response"
+                );
+            }
+
+            return r;
+
+        } catch (Exception ex) {
+            log.error(
+                    "ML prediction request failed: {}",
+                    ex.toString()
+            );
+
+            throw new MlUnavailableException();
+        }
+    }
+
+    public ImageMlResult predictImage(String base64Image) {
+        try {
+            String payload =
+                    mapper.writeValueAsString(
+                            new ImagePredictionRequest(base64Image)
+                    );
+
+            HttpRequest request =
+                    HttpRequest.newBuilder(
+                                    URI.create(url + "/predict-image")
+                            )
+                            .version(HttpClient.Version.HTTP_1_1)
+
+                            // Image OCR can take longer than normal
+                            // text prediction.
+                            .timeout(Duration.ofSeconds(60))
+
+                            .header(
+                                    "X-ML-Service-Token",
+                                    token
+                            )
+                            .header(
+                                    "Content-Type",
+                                    "application/json"
+                            )
+                            .POST(
+                                    HttpRequest.BodyPublishers
+                                            .ofString(payload)
+                            )
+                            .build();
+
+            HttpResponse<String> response =
+                    client.send(
+                            request,
+                            HttpResponse.BodyHandlers.ofString()
+                    );
+
+            if (response.statusCode() != 200) {
+
+                if (
+                        response.statusCode() == 422 ||
+                        response.statusCode() == 400
+                ) {
+                    String detail = mapper.readTree(response.body())
+                            .path("detail")
+                            .asText("Image was rejected by the ML service.");
+                    throw new IllegalArgumentException(
+                            detail
+                    );
+                }
+
+                throw new IllegalStateException(
+                        "ML status "
+                                + response.statusCode()
+                );
+            }
+
+            ImageMlResult r =
+                    mapper.readValue(
+                            response.body(),
+                            ImageMlResult.class
+                    );
+
+            if (
+                    r == null ||
+                    !(
+                            "REAL".equals(r.prediction()) ||
+                            "FAKE".equals(r.prediction())
+                    )
+            ) {
+                throw new IllegalStateException(
+                        "Invalid ML response"
+                );
+            }
+
+            return r;
+
+        } catch (IllegalArgumentException ex) {
+            throw ex;
+
+        } catch (Exception ex) {
+            log.error(
+                    "ML image prediction request failed: {}",
+                    ex.toString()
+            );
+
+            throw new MlUnavailableException();
+        }
+    }
+
+    public static class MlUnavailableException
+            extends RuntimeException {
+    }
+}

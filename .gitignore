@@ -37,3 +37,4 @@ dataset/*.zip
 
 # Trained model artifacts
 backend/*.pkl
+python-ml-service/artifacts/*.pkl

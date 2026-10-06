@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { getApiErrorMessage, unwrapApiData } from '../api/client';
+
+const speechUnsupportedMessage = 'Speech recognition is not supported in this browser. You can enter a transcript below.';
 
 export default function CheckNews({
   backendUrl,
@@ -29,18 +31,26 @@ export default function CheckNews({
   // =====================================================
   const [isRecording, setIsRecording] = useState(false);
 
-  const [recordingStatus, setRecordingStatus] =
-    useState(
-      'Press mic to start speaking'
-    );
-
   const [recognition, setRecognition] =
     useState(null);
+  const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [voiceState, setVoiceState] = useState('idle');
+  const [voiceError, setVoiceError] = useState('');
+  const voiceHasResult = useRef(false);
+  const voiceInProgress = useRef(false);
+  const voiceStateRef = useRef('idle');
+  const activeModeRef = useRef('text');
+  const analysisRequestId = useRef(0);
+  const updateVoiceState = useCallback((state) => {
+    voiceStateRef.current = state;
+    setVoiceState(state);
+  }, []);
 
   // =====================================================
   // OUTPUT STATES
   // =====================================================
   const [result, setResult] = useState(null);
+  const [analyzedContent, setAnalyzedContent] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -48,6 +58,7 @@ export default function CheckNews({
   // FEEDBACK
   // =====================================================
   const [feedback, setFeedback] = useState(null);
+  const [analysisMode, setAnalysisMode] = useState(null);
 
   // =====================================================
   // LIVE NEWS
@@ -55,6 +66,7 @@ export default function CheckNews({
   const [liveNews, setLiveNews] = useState([]);
   const [newsSource, setNewsSource] = useState('');
   const [newsLoading, setNewsLoading] = useState(false);
+  const [newsError, setNewsError] = useState('');
 
   // =====================================================
   // CLEAR LOGIN WARNING AFTER LOGIN
@@ -82,49 +94,84 @@ export default function CheckNews({
       recog.lang = 'en-US';
 
       recog.onstart = () => {
+        if (activeModeRef.current !== 'voice') {
+          try {
+            recog.stop();
+          } catch {
+            // Recognition may already be idle.
+          }
+          return;
+        }
+        voiceInProgress.current = true;
         setIsRecording(true);
-
-        setRecordingStatus(
-          'Listening... Speak now.'
-        );
+        updateVoiceState('recording');
+        setVoiceError('');
+        voiceHasResult.current = false;
       };
 
       recog.onresult = (event) => {
-        const transcript =
-          event.results[0][0].transcript;
+        if (activeModeRef.current !== 'voice') return;
+        const transcript = Array.from(event.results || [])
+          .map((result) => result?.[0]?.transcript || '')
+          .filter(Boolean)
+          .join(' ')
+          .trim();
+        if (!transcript) return;
 
-        setNewsText((prev) =>
-          prev
-            ? prev + ' ' + transcript
-            : transcript
-        );
-
-        setRecordingStatus(
-          `Transcribed: "${transcript}"`
-        );
+        voiceHasResult.current = true;
+        setVoiceTranscript((previous) => [previous, transcript].filter(Boolean).join(' ').trim());
+        updateVoiceState('transcribed');
+        setVoiceError('');
       };
 
       recog.onerror = (e) => {
-        console.error(e);
-
-        setRecordingStatus(
-          'Error recognizing speech. Try again.'
-        );
-
+        voiceInProgress.current = false;
+        const messages = {
+          'not-allowed': 'Microphone access was denied. Allow microphone access in your browser and try again.',
+          'service-not-allowed': 'Speech recognition is blocked by the browser.',
+          'no-speech': 'No speech was detected. Try recording again.',
+          network: 'Speech recognition could not connect. Check your connection and try again.',
+        };
         setIsRecording(false);
+        if (activeModeRef.current !== 'voice') return;
+        setVoiceError(messages[e.error] || 'Speech recognition failed. Try again.');
+        updateVoiceState('error');
       };
 
       recog.onend = () => {
+        voiceInProgress.current = false;
         setIsRecording(false);
+        if (activeModeRef.current !== 'voice') return;
+        if (voiceStateRef.current === 'error') return;
+        if (!voiceHasResult.current) {
+          setVoiceError('No speech was detected. Try recording again.');
+          updateVoiceState('error');
+          return;
+        }
+        updateVoiceState('transcribed');
       };
 
       setRecognition(recog);
+      if (activeModeRef.current === 'voice') {
+        setVoiceError('');
+        updateVoiceState('idle');
+      }
+      return () => {
+        recog.onresult = null;
+        recog.onerror = null;
+        recog.onstart = null;
+        recog.onend = null;
+        try {
+          recog.stop();
+        } catch {
+          // Recognition may already be idle.
+        }
+      };
     } else {
-      setRecordingStatus(
-        'Speech Recognition not supported in this browser.'
-      );
+      setVoiceError(speechUnsupportedMessage);
+      updateVoiceState('error');
     }
-  }, []);
+  }, [updateVoiceState]);
 
   // Release browser object URLs whenever a preview changes or the page unmounts.
   useEffect(() => () => {
@@ -134,12 +181,9 @@ export default function CheckNews({
   // =====================================================
   // FETCH LIVE NEWS
   // =====================================================
-  useEffect(() => {
-    fetchLiveNews();
-  }, []);
-
-  const fetchLiveNews = async () => {
+  const fetchLiveNews = useCallback(async () => {
     try {
+      setNewsError('');
       setNewsLoading(true);
 
       const res = await axios.get(
@@ -158,10 +202,15 @@ export default function CheckNews({
         'Failed to load live news RSS feed',
         err
       );
+      setNewsError('The configured news feed is currently unavailable. Check your connection and try again.');
     } finally {
       setNewsLoading(false);
     }
-  };
+  }, [backendUrl]);
+
+  useEffect(() => {
+    fetchLiveNews();
+  }, [fetchLiveNews]);
 
   // =====================================================
   // AUTH HEADERS
@@ -178,6 +227,55 @@ export default function CheckNews({
           }
         }
       : {};
+  };
+
+  const clearAnalysisState = () => {
+    analysisRequestId.current += 1;
+    setResult(null);
+    setAnalyzedContent('');
+    setAnalysisMode(null);
+    setFeedback(null);
+    setError('');
+    setLoading(false);
+  };
+
+  const switchAnalysisMode = (mode) => {
+    if (mode === activeTab) return;
+    activeModeRef.current = mode;
+    if (activeTab === 'voice' && isRecording && recognition) {
+      try {
+        recognition.stop();
+      } catch {
+        setVoiceError('Recording could not be stopped. Try again.');
+        updateVoiceState('error');
+      }
+    }
+    if (activeTab === 'voice') {
+      setVoiceError('');
+      updateVoiceState(voiceTranscript.trim() ? 'transcribed' : 'idle');
+    }
+    if (mode === 'voice') {
+      if (!recognition) {
+        setVoiceError(speechUnsupportedMessage);
+        updateVoiceState('error');
+      } else {
+        setVoiceError('');
+        updateVoiceState(voiceTranscript.trim() ? 'transcribed' : 'idle');
+      }
+    }
+    clearAnalysisState();
+    setActiveTab(mode);
+  };
+
+  const confidencePercent = (value) => {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) return null;
+    return Math.min(100, Math.max(0, numericValue <= 1 ? numericValue * 100 : numericValue));
+  };
+
+  const formatConfidence = (value) => {
+    const percentage = confidencePercent(value);
+    return percentage === null ? 'Unavailable' : `${Number(percentage.toFixed(2))}%`;
   };
 
   // =====================================================
@@ -198,14 +296,15 @@ export default function CheckNews({
   // =====================================================
   // 1. TEXT ANALYSIS
   // =====================================================
-  const handleCheckText = async () => {
+  const handleCheckText = async (textToAnalyze = newsText, sourceMode = activeTab) => {
 
     // Do not allow analysis without login.
     if (!checkAuth()) {
       return;
     }
 
-    if (!newsText.trim()) {
+    const submittedText = textToAnalyze.trim();
+    if (!submittedText) {
       setError(
         'Please paste or speak news article content.'
       );
@@ -213,6 +312,7 @@ export default function CheckNews({
       return;
     }
 
+    const requestId = ++analysisRequestId.current;
     try {
       setError('');
       setLoading(true);
@@ -222,12 +322,15 @@ export default function CheckNews({
       const res = await axios.post(
         `${backendUrl}/api/predict`,
         {
-          text: newsText
+          text: submittedText
         },
         getAuthHeaders()
       );
 
+      if (requestId !== analysisRequestId.current) return;
       setResult(unwrapApiData(res));
+      setAnalyzedContent(submittedText);
+      setAnalysisMode(sourceMode);
 
     } catch (err) {
       console.error(
@@ -235,22 +338,25 @@ export default function CheckNews({
         err
       );
 
-      setError(getApiErrorMessage(err, 'Failed to analyze text.'));
+      if (requestId === analysisRequestId.current) {
+        setError(getApiErrorMessage(err, 'Failed to analyze text.'));
+      }
     } finally {
-      setLoading(false);
+      if (requestId === analysisRequestId.current) setLoading(false);
     }
   };
 
   // =====================================================
   // 2. URL ANALYSIS
   // =====================================================
-  const handleCheckUrl = async () => {
+  const handleCheckUrl = async (urlToAnalyze = newsUrl) => {
 
     if (!checkAuth()) {
       return;
     }
 
-    if (!newsUrl.trim()) {
+    const submittedUrl = (typeof urlToAnalyze === 'string' ? urlToAnalyze : newsUrl).trim();
+    if (!submittedUrl) {
       setError(
         'Please enter a valid news article link.'
       );
@@ -258,6 +364,7 @@ export default function CheckNews({
       return;
     }
 
+    const requestId = ++analysisRequestId.current;
     try {
       setError('');
       setLoading(true);
@@ -267,18 +374,16 @@ export default function CheckNews({
       const res = await axios.post(
         `${backendUrl}/api/predict-url`,
         {
-          url: newsUrl
+          url: submittedUrl
         },
         getAuthHeaders()
       );
 
-      setResult(res.data);
-
-      if (res.data.scraped_text) {
-        setNewsText(
-          res.data.scraped_text
-        );
-      }
+      const response = unwrapApiData(res);
+      if (requestId !== analysisRequestId.current) return;
+      setResult(response);
+      setAnalyzedContent(response.scraped_text || submittedUrl);
+      setAnalysisMode('url');
 
     } catch (err) {
       console.error(
@@ -286,10 +391,21 @@ export default function CheckNews({
         err
       );
 
-      setError(getApiErrorMessage(err, 'Failed to analyze article from URL.'));
+      if (requestId === analysisRequestId.current) {
+        setError(getApiErrorMessage(err, 'Failed to analyze article from URL.'));
+      }
     } finally {
-      setLoading(false);
+      if (requestId === analysisRequestId.current) setLoading(false);
     }
+  };
+
+  const handleAnalyzeLiveNewsArticle = (url) => {
+    if (activeTab !== 'url') clearAnalysisState();
+    activeModeRef.current = 'url';
+    setActiveTab('url');
+    setNewsUrl(url);
+    void handleCheckUrl(url);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // =====================================================
@@ -307,7 +423,7 @@ export default function CheckNews({
       }
 
       if (file.size > 10 * 1024 * 1024) {
-        setError('Choose an image smaller than 10 MB.');
+        setError('Choose an image that is 10 MB or smaller.');
         return;
       }
 
@@ -339,6 +455,7 @@ export default function CheckNews({
       return;
     }
 
+    const requestId = ++analysisRequestId.current;
     try {
       setError('');
       setLoading(true);
@@ -371,15 +488,10 @@ export default function CheckNews({
           config
         );
 
+      if (requestId !== analysisRequestId.current) return;
       setResult(res.data);
-
-      if (
-        res.data.extracted_text
-      ) {
-        setNewsText(
-          res.data.extracted_text
-        );
-      }
+      setAnalyzedContent(res.data.extracted_text || '');
+      setAnalysisMode('image');
 
     } catch (err) {
       console.error(
@@ -387,9 +499,11 @@ export default function CheckNews({
         err
       );
 
-      setError(getApiErrorMessage(err, 'Failed to process text image.'));
+      if (requestId === analysisRequestId.current) {
+        setError(getApiErrorMessage(err, 'Failed to process text image.'));
+      }
     } finally {
-      setLoading(false);
+      if (requestId === analysisRequestId.current) setLoading(false);
     }
   };
 
@@ -403,12 +517,40 @@ export default function CheckNews({
     }
 
     if (isRecording) {
-      recognition.stop();
+      updateVoiceState('processing');
+      setVoiceError('');
+      try {
+        recognition.stop();
+      } catch {
+        voiceInProgress.current = false;
+        setIsRecording(false);
+        updateVoiceState('error');
+        setVoiceError('Recording could not be stopped. Try again.');
+      }
     } else {
-      // Voice input itself is allowed.
-      // Analysis still requires login.
-      recognition.start();
+      if (voiceInProgress.current) return;
+      voiceInProgress.current = true;
+      clearAnalysisState();
+      setVoiceTranscript('');
+      setVoiceError('');
+      updateVoiceState('processing');
+      try {
+        recognition.start();
+      } catch {
+        voiceInProgress.current = false;
+        setIsRecording(false);
+        updateVoiceState('error');
+        setVoiceError('Recording could not be started. Check microphone access and try again.');
+      }
     }
+  };
+
+  const clearVoiceTranscript = () => {
+    setVoiceTranscript('');
+    setVoiceError('');
+    updateVoiceState('idle');
+    voiceHasResult.current = false;
+    clearAnalysisState();
   };
 
   // =====================================================
@@ -467,6 +609,7 @@ export default function CheckNews({
     setImagePreview(null);
 
     setResult(null);
+    setAnalyzedContent('');
     setError('');
     setFeedback(null);
   };
@@ -478,7 +621,7 @@ export default function CheckNews({
     <div className="analyze-page">
       <header className="analyze-page__header">
         <p className="section-label">ANALYSIS WORKSPACE</p>
-        <h1>Analyze a news story.</h1>
+        <h1>Analyze a news story</h1>
         <p>Submit text, a URL, an image, or voice input to examine it with the Fake News classification model.</p>
       </header>
 
@@ -513,11 +656,10 @@ export default function CheckNews({
                 : ''
             }`}
             onClick={() => {
-              setActiveTab('text');
-              setError('');
+              switchAnalysisMode('text');
             }}
           >
-            ✍️ Text Content
+            Text
           </button>
 
           <button
@@ -530,11 +672,10 @@ export default function CheckNews({
                 : ''
             }`}
             onClick={() => {
-              setActiveTab('url');
-              setError('');
+              switchAnalysisMode('url');
             }}
           >
-            🔗 URL Article
+            URL
           </button>
 
           <button
@@ -547,11 +688,10 @@ export default function CheckNews({
                 : ''
             }`}
             onClick={() => {
-              setActiveTab('image');
-              setError('');
+              switchAnalysisMode('image');
             }}
           >
-            🖼️ Scan Image
+            Image OCR
           </button>
 
           <button
@@ -564,11 +704,10 @@ export default function CheckNews({
                 : ''
             }`}
             onClick={() => {
-              setActiveTab('voice');
-              setError('');
+              switchAnalysisMode('voice');
             }}
           >
-            🎙️ Speech Audio
+            Voice
           </button>
 
         </div>
@@ -611,9 +750,7 @@ export default function CheckNews({
               <button
                 className="btn btn-primary"
                 style={{ flex: 2 }}
-                onClick={
-                  handleCheckText
-                }
+                onClick={() => handleCheckText()}
                 disabled={loading}
               >
                 {loading
@@ -669,9 +806,7 @@ export default function CheckNews({
 
               <button
                 className="btn btn-primary"
-                onClick={
-                  handleCheckUrl
-                }
+                onClick={() => handleCheckUrl()}
                 disabled={loading}
               >
                 {loading
@@ -809,94 +944,88 @@ export default function CheckNews({
         ================================================= */}
         {activeTab === 'voice' && (
           <div
-            className="voice-recorder-box"
+            className="voice-recorder-box voice-analysis"
           >
 
-            <button
-              className={`mic-btn ${
-                isRecording
-                  ? 'recording'
-                  : ''
-              }`}
-              onClick={
-                toggleRecording
-              }
-            >
-              {isRecording
-                ? '⏹️'
-                : '🎙️'}
-            </button>
-
-            <h4
-              style={{
-                marginBottom:
-                  '0.5rem'
-              }}
-            >
-              {isRecording
-                ? 'Listening...'
-                : 'Ready to speak'}
-            </h4>
-
-            <p
-              style={{
-                fontSize: '0.85rem',
-                color:
-                  'var(--text-secondary)'
-              }}
-            >
-              <span className="voice-status">{recordingStatus}</span>
-            </p>
-
-            {newsText && (
-                <div
-                  className="input-area"
-                style={{
-                  marginTop: '1.5rem',
-                  textAlign: 'left'
-                }}
-              >
-
-                <textarea
-                  value={newsText}
-                  onChange={(e) =>
-                    setNewsText(
-                      e.target.value
-                    )
-                  }
-                  placeholder="Voice text will appear here..."
-                />
-
-                <div className="analysis-action-row" style={{ display: 'flex', gap: '0.5rem' }}>
-
-                  <button
-                    className="btn btn-primary"
-                    style={{ flex: 2 }}
-                    onClick={
-                      handleCheckText
-                    }
-                    disabled={loading}
-                  >
-                    {loading
-                      ? 'Running Audit...'
-                      : 'Analyze Spoken Content'}
-                  </button>
-
-                  <button
-                    className="btn btn-secondary"
-                    style={{ flex: 1 }}
-                    onClick={
-                      clearAll
-                    }
-                    disabled={loading}
-                  >
-                    Clear
-                  </button>
-
-                </div>
-
+            <div className="voice-analysis__heading">
+              <div>
+                <h3>Voice analysis</h3>
+                <p>Record a transcript or enter the text to analyze it with the existing text workflow.</p>
               </div>
+              <span className={`voice-analysis__state voice-analysis__state--${voiceState}`} role="status">
+                {voiceState === 'recording'
+                  ? 'Recording'
+                  : voiceState === 'processing'
+                    ? 'Processing'
+                    : voiceState === 'transcribed'
+                      ? 'Transcript ready'
+                      : voiceState === 'error'
+                        ? 'Needs attention'
+                        : 'Idle'}
+              </span>
+            </div>
+
+            {isRecording && (
+              <p className="voice-analysis__recording" aria-live="polite">
+                <span aria-hidden="true" /> Listening… speak now.
+              </p>
             )}
+            {voiceState === 'processing' && !isRecording && (
+              <p className="voice-analysis__message" role="status">Connecting to browser speech recognition…</p>
+            )}
+            {voiceError && <p className="voice-analysis__error" role="alert">{voiceError}</p>}
+
+            <div className="voice-analysis__controls">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={toggleRecording}
+                disabled={!recognition || isRecording || voiceState === 'processing' || loading}
+              >
+                {voiceState === 'processing' ? 'Starting…' : '🎙️ Start recording'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={toggleRecording}
+                disabled={!isRecording || loading}
+              >
+                Stop
+              </button>
+            </div>
+
+            <label className="voice-analysis__transcript-label" htmlFor="voiceTranscript">Transcript</label>
+            <textarea
+              id="voiceTranscript"
+              aria-label="Voice transcript"
+              value={voiceTranscript}
+              onChange={(event) => {
+                setVoiceTranscript(event.target.value);
+                updateVoiceState(event.target.value.trim() ? 'transcribed' : 'idle');
+                setVoiceError('');
+              }}
+              placeholder="Recognized speech will appear here. You can also enter or edit the transcript."
+              disabled={isRecording || loading}
+            />
+
+            <div className="voice-analysis__actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => handleCheckText(voiceTranscript, 'voice')}
+                disabled={!voiceTranscript.trim() || loading || isRecording}
+              >
+                {loading && activeTab === 'voice' ? 'Analyzing transcript…' : 'Analyze transcript'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={clearVoiceTranscript}
+                disabled={loading || isRecording}
+              >
+                Clear
+              </button>
+            </div>
 
           </div>
         )}
@@ -909,92 +1038,24 @@ export default function CheckNews({
         <section className="glass-card analyzer-card analyzer-results-card">
 
         {loading && (
-          <div className="analyzer-loading-state"
-            style={{
-              textAlign: 'center',
-              padding: '3rem 0'
-            }}
-          >
-
-            <div
-              style={{
-                fontSize: '3rem',
-                animation:
-                  'spin 1.5s linear infinite',
-                display: 'inline-block'
-              }}
-            >
-              🌀
-            </div>
-
-            <h3
-              style={{
-                marginTop: '1.25rem'
-              }}
-            >
-              Analyzing News Content...
-            </h3>
-
-            <p
-              style={{
-                fontSize: '0.85rem',
-                color:
-                  'var(--text-muted)'
-              }}
-            >
-              Running preprocessing, TF-IDF feature extraction, and classification.
-            </p>
-
-            <style>{`
-              @keyframes spin {
-                100% {
-                  transform: rotate(360deg);
-                }
-              }
-            `}</style>
-
+          <div className="analyzer-loading-state" role="status">
+            <span className="workspace-loading__spinner" />
+            <h3>Analyzing news content</h3>
+            <p>Running preprocessing, TF-IDF feature extraction, and classification.</p>
           </div>
         )}
 
         {!loading && !result && (
-          <div className="analyzer-empty-state"
-            style={{
-              textAlign: 'center',
-              padding: '3rem 1rem',
-              color:
-                'var(--text-muted)'
-            }}
-          >
-
-            <div
-              style={{
-                fontSize: '3.5rem',
-                marginBottom: '1rem'
-              }}
-            >
-              📈
-            </div>
-
+          <div className="analyzer-empty-state">
             <p className="section-label">MODEL OUTPUT</p>
             <h3>Ready for analysis</h3>
 
-            <p
-              style={{
-                fontSize: '0.9rem',
-                marginTop: '0.5rem',
-                lineHeight: '1.5'
-              }}
-            >
+            <p>
               Your model classification will appear here after you submit content.
             </p>
 
             {!isLoggedIn && (
-              <p
-                style={{
-                  fontSize: '0.85rem',
-                  marginTop: '0.5rem'
-                }}
-              >
+              <p>
                 Sign in to run an analysis.
               </p>
             )}
@@ -1011,26 +1072,26 @@ export default function CheckNews({
                   'var(--font-heading)'
               }}
             >
-              Analysis result
+              AI model assessment
             </h3>
 
-            <p className="result-eyebrow">FAKE NEWS MODEL OUTPUT</p>
+            <p className="result-eyebrow">AI MODEL ASSESSMENT</p>
 
             <div
               className={`result-badge ${
-                result.prediction
-                  .toLowerCase() === 'real'
+                result.prediction?.toLowerCase() === 'real'
                   ? 'real'
                   : 'fake'
               }`}
             >
-              {result.prediction ===
-              'REAL'
-                ? 'REAL'
-                : 'FAKE'}
+              {result.prediction?.toUpperCase() || 'UNAVAILABLE'}
             </div>
 
-              <p className="result-classification-label">Model classification</p>
+            <p className="result-disclaimer">
+            This is an AI model prediction, not a factual determination. Verify important claims using reliable sources.
+            </p>
+
+            <p className="result-classification-label">Model classification</p>
 
             <div
               className="confidence-bar-container"
@@ -1044,7 +1105,7 @@ export default function CheckNews({
                 </span>
 
                 <span>
-                  {result.confidence}%
+                  {formatConfidence(result.confidence)}
                 </span>
               </div>
 
@@ -1053,15 +1114,12 @@ export default function CheckNews({
               >
                 <div
                   className={`confidence-fill ${
-                    result.prediction
-                      .toLowerCase() ===
-                    'real'
+                    result.prediction?.toLowerCase() === 'real'
                       ? 'real'
                       : 'fake'
                   }`}
                   style={{
-                    width:
-                      `${result.confidence}%`
+                    width: `${confidencePercent(result.confidence) ?? 0}%`
                   }}
                 />
               </div>
@@ -1098,11 +1156,11 @@ export default function CheckNews({
                 className="explanation-words"
               >
 
-                {result.important_words &&
-                result.important_words.length >
+                {(result.importantWords || result.important_words) &&
+                (result.importantWords || result.important_words).length >
                   0 ? (
 
-                  result.important_words.map(
+                  (result.importantWords || result.important_words).map(
                     (w, idx) => {
                       return (
                         <span
@@ -1132,6 +1190,35 @@ export default function CheckNews({
               </div>
 
             </div>
+
+            {analysisMode === 'url' && result.source_url && (
+              <div className="result-submitted result-submitted--url">
+                <h4>Source URL</h4>
+                <a href={result.source_url} target="_blank" rel="noopener noreferrer" className="result-source-url">
+                  {result.source_url}
+                </a>
+              </div>
+            )}
+
+            {analysisMode === 'url' && result.scraped_text ? (
+              <div className="result-submitted">
+                <h4>Scraped article text</h4>
+                <p className="result-submitted__preview">
+                  {result.scraped_text.length > 320
+                    ? `${result.scraped_text.slice(0, 320).trimEnd()}…`
+                    : result.scraped_text}
+                </p>
+                <details className="result-submitted__details">
+                  <summary>View extracted article</summary>
+                  <div className="result-submitted__copy">{result.scraped_text}</div>
+                </details>
+              </div>
+            ) : analysisMode !== 'url' && analyzedContent && (
+              <div className="result-submitted">
+                <h4>{analysisMode === 'image' ? 'Extracted image text' : 'Submitted content'}</h4>
+                <div className="result-submitted__copy">{analyzedContent}</div>
+              </div>
+            )}
 
             {/* FEEDBACK */}
             <div
@@ -1208,58 +1295,32 @@ export default function CheckNews({
         {/* =================================================
           LIVE NEWS STREAM
         ================================================= */}
-        <section
-        className="glass-card"
-        style={{
-          gridColumn: '1 / -1'
-        }}
-      >
+        <section className="glass-card live-news-panel">
 
-        <div
-          style={{
-            display: 'flex',
-            justifyContent:
-              'space-between',
-            alignItems: 'center',
-            marginBottom:
-              '1rem'
-          }}
-        >
+        <div className="live-news-heading">
 
           <div>
 
             <h2
-              style={{
-                fontFamily:
-                  'var(--font-heading)'
-              }}
+              className="live-news-title"
             >
               Live news
             </h2>
 
             <p
-              style={{
-                fontSize:
-                  '0.85rem',
-                color:
-                  'var(--text-muted)'
-              }}
+              className="live-news-description"
             >
-              Recent articles from the configured news feed. Source:{' '}
+              Recent articles from the configured news feed
+              {newsSource && <> · Source: {newsSource}</>}
               {newsLoading
-                ? 'Connecting...'
-                : newsSource ||
-                  'BBC News Live'}
+                ? ' · Connecting...'
+                : ''}
             </p>
 
           </div>
 
           <button
             className="btn btn-secondary"
-            style={{
-              padding:
-                '0.5rem 1rem'
-            }}
             onClick={
               fetchLiveNews
             }
@@ -1272,42 +1333,14 @@ export default function CheckNews({
 
         </div>
 
+        {newsError && liveNews.length > 0 && (
+          <p className="live-news-refresh-error" role="alert">{newsError} Showing the last articles received.</p>
+        )}
+
         {newsLoading ? (
-          <div
-            style={{
-              textAlign:
-                'center',
-              padding:
-                '2rem 0'
-            }}
-          >
-
-            <div
-              style={{
-                fontSize:
-                  '2rem',
-                animation:
-                  'spin 1.5s linear infinite',
-                display:
-                  'inline-block'
-              }}
-            >
-              🌀
-            </div>
-
-            <p
-              style={{
-                fontSize:
-                  '0.85rem',
-                color:
-                  'var(--text-muted)',
-                marginTop:
-                  '0.5rem'
-              }}
-            >
-              Fetching top stories...
-            </p>
-
+          <div className="live-news-state" role="status">
+            <span className="workspace-loading__spinner" />
+            <p>Checking the configured news feed...</p>
           </div>
         ) : (
           <div className="live-news-grid">
@@ -1331,49 +1364,33 @@ export default function CheckNews({
                         {news.title}
                       </h4>
 
-                      <span
-                        className={`badge-status ${
-                          news.prediction
-                            ?.toLowerCase() ===
-                          'real'
-                            ? 'real'
-                            : 'fake'
-                        }`}
-                      >
-                        {news.prediction ===
-                        'REAL'
-                          ? 'REAL MODEL SIGNAL'
-                          : 'FAKE MODEL SIGNAL'}
-
-                        {' '}
-                        (
-                        {news.confidence}
-                        %)
-                      </span>
+                      <p className="news-meta">
+                        {news.source || newsSource || 'News source'}
+                      </p>
 
                     </div>
 
-                    <p
-                      style={{
-                        fontSize:
-                          '0.85rem',
-                        color:
-                          'var(--text-secondary)',
-                        lineHeight:
-                          '1.4'
-                      }}
-                    >
+                    <p className="news-summary">
                       {news.description}
                     </p>
 
-                    <a
-                      href={news.link}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="news-link"
-                    >
-                      Read full article ↗
-                    </a>
+                    <div className="news-actions">
+                      <a
+                        href={news.link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="news-link"
+                      >
+                        Read full article ↗
+                      </a>
+                      <button
+                        type="button"
+                        className="news-link news-analyze-link"
+                        onClick={() => handleAnalyzeLiveNewsArticle(news.link)}
+                      >
+                        Analyze article →
+                      </button>
+                    </div>
 
                   </div>
                 )
@@ -1381,21 +1398,16 @@ export default function CheckNews({
 
             ) : (
 
-              <p
-                style={{
-                  textAlign:
-                    'center',
-                  color:
-                    'var(--text-muted)',
-                  fontSize:
-                    '0.9rem'
-                }}
-              >
-                No active headlines
-                received. Make sure your
-                local internet allows
-                outgoing API requests.
-              </p>
+              <div className="live-news-empty" role={newsError ? 'alert' : undefined}>
+                <span className="live-news-empty__mark" aria-hidden="true">i</span>
+                <div>
+                  <h3>{newsError ? 'Headlines are unavailable' : 'No headlines available'}</h3>
+                  <p>{newsError || 'The configured news feed did not return any recent articles. Refresh to check again.'}</p>
+                </div>
+                <button className="btn btn-secondary" type="button" onClick={fetchLiveNews} disabled={newsLoading}>
+                  Retry
+                </button>
+              </div>
 
             )}
 

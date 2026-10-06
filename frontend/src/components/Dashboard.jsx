@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import apiClient from '../api/client';
+import apiClient, { unwrapApiData } from '../api/client';
 
 const formatDate = (value) => {
   if (!value) return 'Date unavailable';
@@ -27,8 +27,10 @@ export default function Dashboard() {
           apiClient.get('/api/dashboard/stats'),
           apiClient.get('/api/history')
         ]);
-        setStats(statsResponse.data);
-        setHistory(historyResponse.data.history || []);
+        const statsPayload = unwrapApiData(statsResponse);
+        const historyPayload = unwrapApiData(historyResponse);
+        setStats(statsPayload || {});
+        setHistory(historyPayload?.history || []);
       } catch (requestError) {
         console.error('Dashboard error:', requestError);
         setError('We could not load your dashboard right now. Please try again.');
@@ -50,10 +52,9 @@ export default function Dashboard() {
   const feedbackCorrect = Number(stats?.feedback_correct || 0);
   const feedbackIncorrect = Number(stats?.feedback_incorrect || 0);
   const rated = feedbackCorrect + feedbackIncorrect;
-  const confidenceValues = history.map((item) => Number(item.confidence)).filter(Number.isFinite);
-  const averageConfidence = confidenceValues.length ? confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length : null;
-  const highestConfidence = confidenceValues.length ? Math.max(...confidenceValues) : null;
-  const lowestConfidence = confidenceValues.length ? Math.min(...confidenceValues) : null;
+  const averageConfidence = stats?.average_confidence ?? null;
+  const highestConfidence = stats?.highest_confidence ?? null;
+  const lowestConfidence = stats?.lowest_confidence ?? null;
   const recent = history.slice(0, 5);
   const dailyStats = Array.isArray(stats?.daily_stats) ? stats.daily_stats : [];
   const dailyMap = new Map(dailyStats.map((item) => [item.day, Number(item.count || 0)]));
@@ -68,13 +69,13 @@ export default function Dashboard() {
 
   return (
     <div className="workspace-page dashboard-page">
-      <header className="workspace-page__header"><div><p className="section-label">PERSONAL DASHBOARD</p><h1>Your analysis overview</h1><p>Track your news classifications, confidence signals, and feedback over time.</p></div><button className="btn btn-primary" type="button" onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-analyze'))}>Analyze News <span aria-hidden="true">-&gt;</span></button></header>
+      <header className="workspace-page__header"><div><p className="section-label">PERSONAL DASHBOARD</p><h1>Dashboard</h1><p>Track your news classifications, confidence signals, and feedback over time.</p></div><button className="btn btn-primary" type="button" onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-analyze'))}>Analyze News <span aria-hidden="true">-&gt;</span></button></header>
 
       <div className="dashboard-metrics">
         <article className="dashboard-metric"><span>Total analyses</span><strong>{total}</strong><small>All completed classifications</small></article>
         <article className="dashboard-metric dashboard-metric--fake"><span>Fake model classifications</span><strong>{fake}</strong><small>Model output labelled FAKE</small></article>
         <article className="dashboard-metric dashboard-metric--real"><span>Real model classifications</span><strong>{real}</strong><small>Model output labelled REAL</small></article>
-        <article className="dashboard-metric"><span>Average model confidence</span><strong>{averageConfidence === null ? 'N/A' : formatConfidence(averageConfidence)}</strong><small>Calculated from loaded history</small></article>
+        <article className="dashboard-metric dashboard-metric--feedback"><span>Feedback received</span><strong>{rated}</strong><small>{feedbackCorrect} correct · {feedbackIncorrect} incorrect</small></article>
       </div>
 
       <div className="dashboard-main-grid">

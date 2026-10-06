@@ -7,5 +7,7 @@ RUN mvn -q -DskipTests package
 FROM eclipse-temurin:21-jre
 WORKDIR /app
 COPY --from=build /build/target/fake-news-api-1.0.0.jar app.jar
+RUN useradd --system --uid 10001 --create-home appuser
 EXPOSE 8080
+USER 10001:10001
 ENTRYPOINT ["java", "-jar", "app.jar"]

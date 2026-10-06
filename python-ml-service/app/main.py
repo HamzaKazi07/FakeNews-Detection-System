@@ -1,6 +1,8 @@
 import hmac
+import io
 import os
 import pickle
+import warnings
 from pathlib import Path
 from typing import Annotated
 
@@ -17,6 +19,7 @@ MODEL_VERSION = os.getenv("MODEL_VERSION", "1.0.0")
 SERVICE_TOKEN = os.getenv("ML_SERVICE_TOKEN", "")
 MIN_NEWS_LENGTH = 20
 MAX_NEWS_LENGTH = 50_000
+MAX_IMAGE_PIXELS = 25_000_000
 
 app = FastAPI(title="Fake News ML Service", docs_url=None, redoc_url=None)
 model = None
@@ -65,11 +68,10 @@ def health():
             "preprocessingVersion": PREPROCESSING_VERSION}
 
 
-@app.post("/predict", response_model=PredictionResponse, dependencies=[__import__("fastapi").Depends(require_service_token)])
-def predict(payload: PredictionRequest):
+def do_predict(text: str) -> PredictionResponse:
     if model is None or vectorizer is None:
         raise HTTPException(status_code=503, detail="Prediction service is temporarily unavailable.")
-    cleaned = preprocess_text(payload.text)
+    cleaned = preprocess_text(text)
     if not cleaned:
         raise HTTPException(status_code=422, detail="News text contains no analysable words.")
     vector = vectorizer.transform([cleaned])
@@ -81,3 +83,64 @@ def predict(payload: PredictionRequest):
     scored = sorted(((names[index], float(vector[0, index])) for index in vector.nonzero()[1]), key=lambda item: item[1], reverse=True)
     return PredictionResponse(prediction=prediction, confidence=float(probabilities[best_index]),
                               important_words=[word for word, _ in scored[:8]], model_version=MODEL_VERSION)
+
+
+@app.post("/predict", response_model=PredictionResponse, dependencies=[__import__("fastapi").Depends(require_service_token)])
+def predict(payload: PredictionRequest):
+    return do_predict(payload.text)
+
+class ImagePredictionRequest(BaseModel):
+    image_base64: str
+
+class ImagePredictionResponse(PredictionResponse):
+    extracted_text: str
+
+import base64
+import pytesseract
+from PIL import Image
+
+@app.post("/predict-image", response_model=ImagePredictionResponse, dependencies=[__import__("fastapi").Depends(require_service_token)])
+def predict_image(payload: ImagePredictionRequest):
+    try:
+        image_data = base64.b64decode(payload.image_base64)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", Image.DecompressionBombWarning)
+            image = Image.open(io.BytesIO(image_data))
+        if image.format not in ("PNG", "JPEG", "WEBP"):
+            raise ValueError("Unsupported format")
+        width, height = image.size
+        if width * height > MAX_IMAGE_PIXELS:
+            raise HTTPException(
+                status_code=400,
+                detail="Image dimensions exceed the 25-megapixel limit.",
+            )
+        image.load()
+    except HTTPException:
+        raise
+    except Image.DecompressionBombError:
+        raise HTTPException(
+            status_code=400,
+            detail="Image dimensions exceed the 25-megapixel limit.",
+        )
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid or unreadable image.")
+
+    try:
+        extracted_text = pytesseract.image_to_string(image).strip()
+    except Exception:
+        raise HTTPException(status_code=500, detail="OCR processing failed.")
+
+    if len(extracted_text) < MIN_NEWS_LENGTH:
+        raise HTTPException(status_code=422, detail="Image does not contain enough readable text.")
+
+    if len(extracted_text) > MAX_NEWS_LENGTH:
+        extracted_text = extracted_text[:MAX_NEWS_LENGTH]
+
+    base_response = do_predict(extracted_text)
+    return ImagePredictionResponse(
+        prediction=base_response.prediction,
+        confidence=base_response.confidence,
+        important_words=base_response.important_words,
+        model_version=base_response.model_version,
+        extracted_text=extracted_text
+    )
