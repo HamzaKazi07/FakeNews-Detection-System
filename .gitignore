@@ -38,3 +38,7 @@ dataset/*.zip
 # Trained model artifacts
 backend/*.pkl
 python-ml-service/artifacts/*.pkl
+
+# Local startup scripts containing secrets
+spring-backend/start-backend.ps1
+python-ml-service/start-ml.ps1

@@ -89,6 +89,39 @@ python-ml-service/artifacts/vectorizer.pkl
 
 On a clean checkout, obtain those existing artifacts from the project owner or approved artifact storage, then copy them into that directory. The Docker build reports an actionable error if either file is absent. Docker does **not** train or regenerate a model.
 
+## Start the Project
+
+### Manual Startup — Without Docker and Git
+
+Make sure PostgreSQL is running and the `.env` file is configured.
+
+#### 1. Start the FastAPI ML Service
+
+Open Terminal 1:
+
+```powershell
+cd python-ml-service
+.\start-ml.ps1
+```
+
+#### 2. Start the Spring Boot Backend
+
+Open Terminal 2:
+
+```powershell
+cd spring-backend
+.\start-backend.ps1
+```
+
+#### 3. Start the React Frontend
+
+Open Terminal 3:
+
+```powershell
+cd frontend
+npm run dev -- --host 0.0.0.0 --port 5174
+```
+
 ## Run with Docker Compose
 
 Configure the required environment variables from `.env.example` in a local `.env` file; do not commit the local file. Stage the two ML artifacts at the paths above, then from the repository root run:
